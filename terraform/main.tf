@@ -12,6 +12,18 @@ provider "google" {
   region  = "europe-central2"
 }
 
+resource "google_compute_network" "delta-lake-network" {
+  name                    = "delta-lake-network2"
+  auto_create_subnetworks = false
+}
+
+resource "google_compute_subnetwork" "delta-lake-subnet" {
+  name                     = "delta-lake-subnet"
+  ip_cidr_range            = "10.2.0.0/16"
+  region                   = "europe-central2"
+  network                  = google_compute_network.delta-lake-network.id
+  private_ip_google_access = true
+}
 
 resource "google_service_account" "delta-lake-sa" {
   account_id   = "delta-lake-sa"
@@ -34,7 +46,7 @@ resource "google_storage_bucket" "dataproc-staging" {
 
 resource "google_dataproc_cluster" "delta-lake-cluster" {
   name                          = "delta-lake-cluster"
-  region                      = "europe-central2"
+  region                        = "europe-central2"
   graceful_decommission_timeout = "120s"
 
   cluster_config {
@@ -55,7 +67,6 @@ resource "google_dataproc_cluster" "delta-lake-cluster" {
       min_cpu_platform = "Intel Skylake"
       disk_config {
         boot_disk_size_gb = 30
-        num_local_ssds    = 1
       }
     }
 
@@ -69,6 +80,11 @@ resource "google_dataproc_cluster" "delta-lake-cluster" {
       override_properties = {
         "dataproc:dataproc.allow.zero.workers" = "true"
       }
+      optional_components = ["JUPYTER"]
+    }
+
+    endpoint_config {
+      enable_http_port_access = "true"
     }
 
 
