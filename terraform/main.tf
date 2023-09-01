@@ -62,12 +62,8 @@ resource "google_compute_instance" "reverse-proxy" {
   }
 
   // Local SSD disk
-  scratch_disk {
-    interface = "SCSI"
-  }
-
   network_interface {
-    network = google_compute_subnetwork.delta-lake-subnet.name
+    subnetwork = google_compute_subnetwork.delta-lake-subnet.name
 
     access_config {
       // Ephemeral public IP
