@@ -19,6 +19,16 @@ module "project-factory_project_services" {
   activate_apis = var.services
 }
 
+module "cloud-nat" {
+  source        = "terraform-google-modules/cloud-nat/google"
+  version       = "4.1.0"
+  project_id    = var.project
+  router        = "delta-lake-router"
+  region        = var.region
+  create_router = true
+  network       = google_compute_network.delta_lake_network.id
+}
+
 resource "google_compute_global_address" "private_ip_alloc" {
   name          = "private-ip-alloc"
   purpose       = "VPC_PEERING"
@@ -28,12 +38,18 @@ resource "google_compute_global_address" "private_ip_alloc" {
 }
 
 # Create a private connection
+# Allows for communication with managed services
 resource "google_service_networking_connection" "default" {
   network                 = google_compute_network.delta_lake_network.id
   service                 = "servicenetworking.googleapis.com"
   reserved_peering_ranges = [google_compute_global_address.private_ip_alloc.name]
 }
 
+############################################################################
+
+#                              DATASTREAM SETUP
+
+############################################################################
 resource "google_datastream_private_connection" "default" {
   display_name          = "Connection profile"
   location              = var.region
@@ -69,15 +85,57 @@ resource "google_datastream_connection_profile" "mysql_connection" {
     hostname = google_compute_instance.reverse_proxy.network_interface.0.network_ip
     username = google_sql_user.datastream_user.name
     password = google_sql_user.datastream_user.password
-    port = "3306"
+    port     = "3306"
     #    database = google_sql_database.db.name
   }
 }
+
+resource "google_datastream_stream" "delta_lake_stream" {
+  display_name  = "CloudSQL to GCS"
+  location      = var.region
+  stream_id     = "delta_lake_stream"
+  desired_state = "RUNNING"
+
+  source_config {
+    source_connection_profile = google_datastream_connection_profile.mysql_connection.id
+    mysql_source_config {
+      #include_objects {
+      #  mysql_databases {
+      #    database = "cover_type"
+      #    mysql_tables {
+      #      table = "table"
+      #      mysql_columns {
+      #        column = "column"
+      #      }
+      #    }
+      #  }
+      #}
+
+    }
+  }
+
+  destination_config {
+    destination_connection_profile = google_datastream_connection_profile.gcs_connection.id
+    gcs_destination_config {
+      path = "/"
+      avro_file_format {
+      }
+    }
+  }
+  backfill_none {}
+
+}
+
 
 resource "random_password" "pwd" {
   length  = 16
   special = false
 }
+############################################################################
+
+#                              CLOUDSQL SETUP
+
+############################################################################
 
 resource "google_sql_user" "datastream_user" {
   name     = "datastream-user"
@@ -109,9 +167,27 @@ resource "google_sql_database_instance" "instance" {
   deletion_protection = "false"
 }
 
+resource "google_sql_database" "cover_type" {
+  instance = google_sql_database_instance.instance.name
+  name     = "cover_type"
+}
+############################################################################
+
+#                              NETWORKING SETUP
+
+############################################################################
+
 resource "google_compute_network" "delta_lake_network" {
   name                    = "delta-lake-network2"
   auto_create_subnetworks = false
+}
+
+resource "google_compute_subnetwork" "delta_lake_subnet" {
+  name                     = "delta-lake-subnet"
+  ip_cidr_range            = "10.2.0.0/16"
+  region                   = "europe-central2"
+  network                  = google_compute_network.delta_lake_network.id
+  private_ip_google_access = true
 }
 
 resource "google_compute_firewall" "delta_allow_all_internal" {
@@ -130,65 +206,20 @@ resource "google_compute_firewall" "delta_allow_all_internal" {
     protocol = "udp"
     ports    = ["0-65535"]
   }
-  source_ranges = ["0.0.0.0/0"]
+  source_ranges = ["10.0.0.0/8"]
 }
 
+
+############################################################################
+
+#                           SERVICE ACCOUNTS SETUP
+
+############################################################################
 
 resource "google_service_account" "reverse_proxy_sa" {
   account_id   = "reverse-proxy-sa"
   display_name = "Reverse proxy Service Account"
 }
-
-resource "google_compute_subnetwork" "delta_lake_subnet" {
-  name                     = "delta-lake-subnet"
-  ip_cidr_range            = "10.2.0.0/16"
-  region                   = "europe-central2"
-  network                  = google_compute_network.delta_lake_network.id
-  private_ip_google_access = true
-}
-resource "google_compute_instance" "reverse_proxy" {
-  name         = "reverse-proxy"
-  machine_type = "n1-standard-1"
-  zone         = "europe-central2-a"
-
-
-  boot_disk {
-    initialize_params {
-      image = "debian-cloud/debian-11"
-    }
-  }
-
-  // Local SSD disk
-  network_interface {
-    subnetwork = google_compute_subnetwork.delta_lake_subnet.name
-
-  }
-
-
-  metadata_startup_script = <<EOT
-#! /bin/bash
-
-export DB_ADDR=${google_sql_database_instance.instance.private_ip_address}
-export DB_PORT=3306
-
-export ETH_NAME=$(ip -o link show | awk -F': ' '{print $2}' | grep -v lo)
-
-export LOCAL_IP_ADDR=$(ip -4 addr show $ETH_NAME | grep -Po 'inet \K[\d.]+')
-
-echo 1 > /proc/sys/net/ipv4/ip_forward
-iptables -t nat -A PREROUTING -p tcp -m tcp --dport $DB_PORT -j DNAT \
---to-destination $DB_ADDR:$DB_PORT
-iptables -t nat -A POSTROUTING -j SNAT --to-source $LOCAL_IP_ADDR
-EOT
-
-
-  service_account {
-    # Google recommends custom service accounts that have cloud-platform scope and permissions granted via IAM Roles.
-    email  = google_service_account.reverse_proxy_sa.email
-    scopes = ["cloud-platform"]
-  }
-}
-
 
 resource "google_service_account" "delta_lake_sa" {
   account_id   = "delta-lake-sa"
@@ -200,6 +231,67 @@ resource "google_project_iam_member" "dataproc_worker_role" {
   role    = "roles/dataproc.worker"
   member  = "serviceAccount:${google_service_account.delta_lake_sa.email}"
 }
+
+resource "google_project_iam_member" "dataproc_storage_admin_role" {
+  project = var.project
+  role    = "roles/storage.objectAdmin"
+  member  = "serviceAccount:${google_service_account.delta_lake_sa.email}"
+}
+
+
+############################################################################
+
+#                              COMPUTE SETUP
+
+############################################################################
+
+resource "google_compute_instance" "reverse_proxy" {
+  name         = "reverse-proxy"
+  machine_type = "n1-standard-1"
+  zone         = "europe-central2-a"
+
+  boot_disk {
+    initialize_params {
+      image = "debian-cloud/debian-11"
+    }
+  }
+
+  // Local SSD disk
+  network_interface {
+    subnetwork = google_compute_subnetwork.delta_lake_subnet.name
+  }
+  tags = ["bastion-host"]
+
+  metadata_startup_script = <<-EOT
+    #! /bin/bash
+    
+    export DB_ADDR=${google_sql_database_instance.instance.private_ip_address}
+    export DB_PORT=3306
+    
+    export ETH_NAME=$(ip -o link show | awk -F': ' '{print $2}' | grep -v lo)
+    
+    export LOCAL_IP_ADDR=$(ip -4 addr show $ETH_NAME | grep -Po 'inet \K[\d.]+')
+    
+    echo 1 > /proc/sys/net/ipv4/ip_forward
+    iptables -t nat -A PREROUTING -p tcp -m tcp --dport $DB_PORT -j DNAT \
+    --to-destination $DB_ADDR:$DB_PORT
+    iptables -t nat -A POSTROUTING -j SNAT --to-source $LOCAL_IP_ADDR
+    EOT
+
+  service_account {
+    # Google recommends custom service accounts that have cloud-platform scope and permissions granted via IAM Roles.
+    email  = google_service_account.reverse_proxy_sa.email
+    scopes = ["cloud-platform"]
+  }
+}
+
+
+############################################################################
+
+#                              STORAGE SETUP
+
+############################################################################
+
 
 resource "google_storage_bucket" "dataproc_staging" {
   name          = var.dataproc_staging_bucket
@@ -235,6 +327,13 @@ resource "google_storage_bucket_object" "init_script" {
   name   = "${data.local_file.init_script.content_md5}.sh"
 }
 
+############################################################################
+
+#                              DATAPROC SETUP
+
+############################################################################
+
+
 resource "google_dataproc_cluster" "delta_lake_cluster" {
   name                          = "delta-lake-cluster"
   region                        = "europe-central2"
@@ -269,11 +368,16 @@ resource "google_dataproc_cluster" "delta_lake_cluster" {
     software_config {
       image_version = "2.0.74-debian10"
       override_properties = {
-        "dataproc:dataproc.allow.zero.workers" = "true"
+        "spark:spark.jars.packages" = "org.apache.spark:spark-avro_2.12:3.1.3,io.delta:delta-core_2.12:1.0.0",
+        "spark:spark.sql.repl.eagerEval.enabled" = "True",
+        "spark:spark.sql.catalog.spark_catalog"="org.apache.spark.sql.delta.catalog.DeltaCatalog",
+        "spark:spark.sql.extensions"= "io.delta.sql.DeltaSparkSessionExtension"
+        "dataproc:dataproc.allow.zero.workers" = "false"
       }
       optional_components = ["JUPYTER"]
     }
 
+    #this is needed to access the jupyter UI
     endpoint_config {
       enable_http_port_access = "true"
     }
@@ -292,12 +396,19 @@ resource "google_dataproc_cluster" "delta_lake_cluster" {
   }
 
 }
-####### OUTPUTS
-output "ip" {
+
+############################################################################
+
+#                              OUTPUTS
+
+############################################################################
+
+
+output "reverse_proxy_ip" {
   value = google_compute_instance.reverse_proxy.network_interface.0.network_ip
 }
 
-output "private_address" {
+output "sql_private_address" {
   value       = google_sql_database_instance.instance.private_ip_address
   description = "The private IP address assigned for the master instance"
 }
