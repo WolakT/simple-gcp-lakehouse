@@ -366,9 +366,9 @@ resource "google_dataproc_cluster" "delta_lake_cluster" {
 
     # Override or set some custom properties
     software_config {
-      image_version = "2.0.74-debian10"
+      image_version = "2.1.22-debian11"
       override_properties = {
-        "spark:spark.jars.packages" = "org.apache.spark:spark-avro_2.12:3.1.3,io.delta:delta-core_2.12:1.0.0",
+        "spark:spark.jars.packages" = "org.apache.spark:spark-avro_2.12:3.3.0,io.delta:delta-core_2.12:2.3.0",
         "spark:spark.sql.repl.eagerEval.enabled" = "True",
         "spark:spark.sql.catalog.spark_catalog"="org.apache.spark.sql.delta.catalog.DeltaCatalog",
         "spark:spark.sql.extensions"= "io.delta.sql.DeltaSparkSessionExtension"
