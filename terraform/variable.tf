@@ -1,6 +1,6 @@
 variable "project" {
   type    = string
-  default = "dataengineering-experiments"
+  default = "production0987"
 }
 
 variable "services" {

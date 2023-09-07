@@ -1,0 +1,1 @@
+gcloud services enable compute.googleapis.com dataproc.googleapis.com cloudbuild.googleapis.com sql-component.googleapis.com sqladmin.googleapis.com datastream.googleapis.com  cloudresourcemanager.googleapis.com servicenetworking.googleapis.com

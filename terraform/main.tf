@@ -66,6 +66,7 @@ resource "google_datastream_connection_profile" "gcs_connection" {
   location              = var.region
   connection_profile_id = "gcs-connection"
 
+  depends_on   = [module.project-factory_project_services]
   gcs_profile {
     bucket    = google_storage_bucket.lakehouse.name
     root_path = "/"
@@ -147,6 +148,8 @@ resource "google_sql_database_instance" "instance" {
   name             = "delta-lake-instance"
   database_version = "MYSQL_8_0"
   region           = var.region
+  depends_on   = [module.project-factory_project_services, google_service_networking_connection.default]
+
   settings {
     backup_configuration {
 
@@ -180,6 +183,7 @@ resource "google_sql_database" "cover_type" {
 resource "google_compute_network" "delta_lake_network" {
   name                    = "delta-lake-network2"
   auto_create_subnetworks = false
+  depends_on   = [module.project-factory_project_services]
 }
 
 resource "google_compute_subnetwork" "delta_lake_subnet" {
@@ -207,6 +211,20 @@ resource "google_compute_firewall" "delta_allow_all_internal" {
     ports    = ["0-65535"]
   }
   source_ranges = ["10.0.0.0/8"]
+}
+
+resource "google_compute_firewall" "delta_allow_ssh" {
+  name    = "delta-allow-ssh"
+  network = google_compute_network.delta_lake_network.name
+
+
+  allow {
+    protocol = "tcp"
+    ports    = ["22"]
+  }
+  
+  source_ranges = ["0.0.0.0/0"]
+  target_tags = ["bastion-host"]
 }
 
 
@@ -249,6 +267,7 @@ resource "google_compute_instance" "reverse_proxy" {
   name         = "reverse-proxy"
   machine_type = "n1-standard-1"
   zone         = "europe-central2-a"
+  depends_on   = [module.project-factory_project_services]
 
   boot_disk {
     initialize_params {
@@ -291,28 +310,45 @@ resource "google_compute_instance" "reverse_proxy" {
 #                              STORAGE SETUP
 
 ############################################################################
+resource "random_string" "staging" {
+  length    = 4
+  special   = false
+  min_lower = 4
+}
+
+resource "random_string" "scripts" {
+  length    = 4
+  special   = false
+  min_lower = 4
+}
+
+resource "random_string" "lakehouse" {
+  length    = 4
+  special   = false
+  min_lower = 4
+}
 
 
 resource "google_storage_bucket" "dataproc_staging" {
-  name          = var.dataproc_staging_bucket
+  name          = "${var.dataproc_staging_bucket}-${random_string.staging.result}"
   location      = var.region
-  force_destroy = false
+  force_destroy = true
 
   public_access_prevention = "enforced"
 }
 
 resource "google_storage_bucket" "scripts" {
-  name          = var.scripts_bucket
+  name          = "${var.scripts_bucket}-${random_string.scripts.result}"
   location      = var.region
-  force_destroy = false
+  force_destroy = true
 
   public_access_prevention = "enforced"
 }
 
 resource "google_storage_bucket" "lakehouse" {
-  name          = var.lakehouse_bucket
+  name          = "${var.lakehouse_bucket}-${random_string.lakehouse.result}"
   location      = var.region
-  force_destroy = false
+  force_destroy = true
 
   public_access_prevention = "enforced"
 }
@@ -338,6 +374,8 @@ resource "google_dataproc_cluster" "delta_lake_cluster" {
   name                          = "delta-lake-cluster"
   region                        = "europe-central2"
   graceful_decommission_timeout = "120s"
+
+  depends_on   = [module.project-factory_project_services]
 
   cluster_config {
     staging_bucket = google_storage_bucket.dataproc_staging.name
@@ -368,11 +406,11 @@ resource "google_dataproc_cluster" "delta_lake_cluster" {
     software_config {
       image_version = "2.1.22-debian11"
       override_properties = {
-        "spark:spark.jars.packages" = "org.apache.spark:spark-avro_2.12:3.3.0,io.delta:delta-core_2.12:2.3.0",
+        "spark:spark.jars.packages"              = "org.apache.spark:spark-avro_2.12:3.3.0,io.delta:delta-core_2.12:2.3.0",
         "spark:spark.sql.repl.eagerEval.enabled" = "True",
-        "spark:spark.sql.catalog.spark_catalog"="org.apache.spark.sql.delta.catalog.DeltaCatalog",
-        "spark:spark.sql.extensions"= "io.delta.sql.DeltaSparkSessionExtension"
-        "dataproc:dataproc.allow.zero.workers" = "false"
+        "spark:spark.sql.catalog.spark_catalog"  = "org.apache.spark.sql.delta.catalog.DeltaCatalog",
+        "spark:spark.sql.extensions"             = "io.delta.sql.DeltaSparkSessionExtension"
+        "dataproc:dataproc.allow.zero.workers"   = "false"
       }
       optional_components = ["JUPYTER"]
     }
@@ -411,5 +449,17 @@ output "reverse_proxy_ip" {
 output "sql_private_address" {
   value       = google_sql_database_instance.instance.private_ip_address
   description = "The private IP address assigned for the master instance"
+}
+
+output "random_lakehouse" {
+  value = random_string.lakehouse.result
+}
+
+output "random_scripts" {
+  value = random_string.scripts.result
+}
+
+output "random_staging" {
+  value = random_string.staging.result
 }
 
