@@ -1,4 +1,5 @@
 # simple-gcp-lakehouse
+[architecture image](data/simple-gcp-lakehouse.png)
 ## Quickstart:
 
 1. Clone the repo
