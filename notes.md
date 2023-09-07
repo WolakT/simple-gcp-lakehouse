@@ -21,13 +21,14 @@
 
 ## Terraform
 
-1. Using modules saves work. For example module for services helps in setting up behaviour while destroying the app. See [a relative link](terraform/main.tf)
+1. Using modules saves work. For example module for services helps in setting up behaviour while destroying the app. See [terraform main file](terraform/main.tf). In this project such module is `module "project-factory_project_services`
+ 
 
 
-## GCLOUD commands
+oo GCLOUD commands
 
-1. There is an option to change the delimiter for gcloud commands. Use ^DELIMITER^ after the flag to change the default delimiter. This is useful if you have comma in the text you want to pass. See example *gcloud_command_dataproc_setup.sh* [a relative link](gcloud_command_dataproc_setup.sh)
+1. There is ry_project_services"option to change the delimiter for gcloud commands. Use ^DELIMITER^ after the flag to change the default delimiter. This is useful if you have comma in the text you want to pass. See example [gcloud command](gcloud_command_dataproc_setup.sh)
 
-2. If changing the delimiter is not enough use use `gcloud topic flag-file` for alternative
+2. If changing the delimiter is not enough use use `gcloud topic flags-file` for alternative
 
 
