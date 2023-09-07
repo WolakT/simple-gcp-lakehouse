@@ -25,9 +25,9 @@
  
 
 
-oo GCLOUD commands
+## GCLOUD command
 
-1. There is ry_project_services"option to change the delimiter for gcloud commands. Use ^DELIMITER^ after the flag to change the default delimiter. This is useful if you have comma in the text you want to pass. See example [gcloud command](gcloud_command_dataproc_setup.sh)
+1. There is option to change the delimiter for gcloud commands. Use ^DELIMITER^ after the flag to change the default delimiter. This is useful if you have comma in the text you want to pass. See example [gcloud command](gcloud_command_dataproc_setup.sh)
 
 2. If changing the delimiter is not enough use use `gcloud topic flags-file` for alternative
 
