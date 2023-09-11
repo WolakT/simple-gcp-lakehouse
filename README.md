@@ -2,7 +2,7 @@
 This repository contains a full terraform code for providing infrastructure for a simple data lakehouse on GCP. 
 ![architecture image](data/simple-gcp-lakehouse.png)
 ### Prerequisites: 
-1. GCP Project with enabled billing or a free trail version (used CPUs are withing the treshold of a free trail)
+1. GCP Project with enabled billing or a free trail version (used CPUs are within the treshold of a free trail)
 2. Terraform installed with version 1 or above
 </b>
 ## Quickstart:
